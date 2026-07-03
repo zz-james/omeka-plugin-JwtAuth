@@ -33,15 +33,19 @@ class JwtAuthPlugin extends Omeka_Plugin_AbstractPlugin
         // Load Composer deps (firebase/php-jwt)
         require_once dirname(__FILE__) . '/vendor/autoload.php';
 
-        // Add libraries/ to include path for JwtAuth_ class autoloading
-        set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__) . '/libraries');
+        $pluginDir = dirname(__FILE__);
+        set_include_path(
+            $pluginDir . '/models'
+            . PATH_SEPARATOR . $pluginDir . '/libraries'
+            . PATH_SEPARATOR . get_include_path()
+        );
         Zend_Loader_Autoloader::getInstance()->registerNamespace('JwtAuth_');
 
         $front = Zend_Controller_Front::getInstance();
 
-        // Register plugin controller directory under module 'jwt_auth'
-        // ZF1 maps module 'jwt_auth' -> class prefix 'JwtAuth_'
-        $front->addControllerDirectory(dirname(__FILE__) . '/controllers', 'jwt_auth');
+        // Register plugin controller directory under module 'jwt-auth'
+        // ZF1 maps module 'jwt-auth' -> class prefix 'JwtAuth_'
+        $front->addControllerDirectory(dirname(__FILE__) . '/controllers', 'jwt-auth');
 
         // Register front controller plugin to validate JWT cookies on /api/* routes
         $front->registerPlugin(new JwtAuth_Controller_Plugin_ApiAuth());
@@ -54,16 +58,16 @@ class JwtAuthPlugin extends Omeka_Plugin_AbstractPlugin
         $router = $args['router'];
 
         $routes = [
-            'jwt_auth_login'    => ['auth/login',    'login'],
-            'jwt_auth_logout'   => ['auth/logout',   'logout'],
-            'jwt_auth_me'       => ['auth/me',       'me'],
-            'jwt_auth_register' => ['auth/register', 'register'],
+            'jwt-auth_login'    => ['auth/login',    'login'],
+            'jwt-auth_logout'   => ['auth/logout',   'logout'],
+            'jwt-auth_me'       => ['auth/me',       'me'],
+            'jwt-auth_register' => ['auth/register', 'register'],
         ];
 
         foreach ($routes as $name => [$path, $action]) {
             $router->addRoute($name, new Zend_Controller_Router_Route(
                 $path,
-                ['module' => 'jwt_auth', 'controller' => 'auth', 'action' => $action]
+                ['module' => 'jwt-auth', 'controller' => 'auth', 'action' => $action]
             ));
         }
     }

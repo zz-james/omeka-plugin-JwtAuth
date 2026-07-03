@@ -28,7 +28,13 @@ class JwtAuth_TokenService
         $refreshToken = bin2hex(random_bytes(32));
         $tokenHash    = hash('sha256', $refreshToken);
 
-        // TODO: persist $tokenHash to jwt_refresh_tokens table
+        self::_db()->insert('JwtRefreshToken', [
+            'token_hash' => $tokenHash,
+            'user_id'    => $userId,
+            'expires_at' => date('Y-m-d H:i:s', $now + self::REFRESH_TTL),
+            'revoked'    => 0,
+            'created_at' => date('Y-m-d H:i:s', $now),
+        ]);
 
         return [
             'access_token'  => $accessToken,
@@ -61,25 +67,35 @@ class JwtAuth_TokenService
         }
 
         $tokenHash = hash('sha256', $token);
+        $row = self::_db()->getTable('JwtRefreshToken')->findByTokenHash($tokenHash);
 
-        // TODO: look up $tokenHash in jwt_refresh_tokens table
-        // TODO: check revoked = 0 and expires_at > NOW()
-        // TODO: return user_id if valid, null otherwise
-        return null;
+        if (!$row || $row->revoked || strtotime($row->expires_at) <= time()) {
+            return null;
+        }
+
+        return (int) $row->user_id;
     }
 
     // Revoke a refresh token by its raw cookie value.
     public static function revokeRefreshToken(string $rawToken): void
     {
         $tokenHash = hash('sha256', $rawToken);
-        // TODO: set revoked = 1 on the matching jwt_refresh_tokens row
+        self::_db()->getTable('JwtRefreshToken')->revokeByTokenHash($tokenHash);
+    }
+
+    private static function _db(): Omeka_Db
+    {
+        return Zend_Registry::get('bootstrap')->getResource('Db');
     }
 
     private static function _secret(): string
     {
-        // JWT secret read from Omeka config, never hardcoded
         $config = Zend_Registry::get('bootstrap')->getResource('Config');
         $secret = $config->jwtauth->secret ?? null;
+        // Fall back to environment variable (useful in Docker)
+        if (!$secret) {
+            $secret = getenv('JWT_SECRET') ?: null;
+        }
         if (!$secret) {
             throw new \RuntimeException('JwtAuth: jwt secret not configured.');
         }
