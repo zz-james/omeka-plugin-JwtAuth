@@ -11,6 +11,10 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
     // POST /auth/login
     public function loginAction()
     {
+        if ($this->getRequest()->getMethod() === 'OPTIONS') {
+            $this->getResponse()->setHttpResponseCode(204);
+            return;
+        }
         if (!$this->getRequest()->isPost()) {
             return $this->_sendError('Method not allowed', 405);
         }
@@ -20,25 +24,24 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
             return $this->_sendError('email and password required', 422);
         }
 
-        // TODO: authenticate via Omeka_Auth_Adapter_UserTable
-        // $adapter = (new Omeka_Auth_Adapter_UserTable($this->_helper->db->getDb()))
-        //     ->setIdentity($body['email'])
-        //     ->setCredential($body['password']);
-        // $result = $adapter->authenticate();
-        // if (!$result->isValid()) { return $this->_sendError('Invalid credentials', 401); }
-        // $userId = $result->getIdentity();
+        $user = $this->_helper->db->getTable('User')->findByEmail($body['email']);
 
-        // TODO: issue tokens and set cookies
-        // $tokens = JwtAuth_TokenService::issue($userId);
-        // JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
+        if (!$user || !$user->active || !password_verify($body['password'], $user->password)) {
+            return $this->_sendError('Invalid credentials', 401);
+        }
 
-        // TODO: return user JSON
-        // $this->_sendJson($this->_userPayload($userId));
+        $tokens = JwtAuth_TokenService::issue((int) $user->id, $user->role);
+        JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
+        $this->_sendJson($this->_userPayload((int) $user->id));
     }
 
     // POST /auth/logout
     public function logoutAction()
     {
+        if ($this->getRequest()->getMethod() === 'OPTIONS') {
+            $this->getResponse()->setHttpResponseCode(204);
+            return;
+        }
         if (!$this->getRequest()->isPost()) {
             return $this->_sendError('Method not allowed', 405);
         }
@@ -46,7 +49,7 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
         // TODO: validate access token cookie
         // TODO: revoke refresh token in DB
         // TODO: clear cookies
-        // JwtAuth_CorsHelper::clearAuthCookies($this->getResponse());
+        // JwtAuth_CorsHelper::clearAuthCookies();
 
         $this->getResponse()->setHttpResponseCode(204);
     }
@@ -54,6 +57,10 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
     // GET /auth/me
     public function meAction()
     {
+        if ($this->getRequest()->getMethod() === 'OPTIONS') {
+            $this->getResponse()->setHttpResponseCode(204);
+            return;
+        }
         // TODO: validate access token cookie, get user_id
         // TODO: attempt silent refresh if access token expired
         // $claims = JwtAuth_TokenService::validateAccessCookie($this->getRequest());
@@ -64,6 +71,10 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
     // POST /auth/register
     public function registerAction()
     {
+        if ($this->getRequest()->getMethod() === 'OPTIONS') {
+            $this->getResponse()->setHttpResponseCode(204);
+            return;
+        }
         if (!$this->getRequest()->isPost()) {
             return $this->_sendError('Method not allowed', 405);
         }

@@ -33,8 +33,12 @@ class JwtAuthPlugin extends Omeka_Plugin_AbstractPlugin
         // Load Composer deps (firebase/php-jwt)
         require_once dirname(__FILE__) . '/vendor/autoload.php';
 
-        // Add libraries/ to include path for JwtAuth_ class autoloading
-        set_include_path(get_include_path() . PATH_SEPARATOR . dirname(__FILE__) . '/libraries');
+        $pluginDir = dirname(__FILE__);
+        set_include_path(
+            $pluginDir . '/models'
+            . PATH_SEPARATOR . $pluginDir . '/libraries'
+            . PATH_SEPARATOR . get_include_path()
+        );
         Zend_Loader_Autoloader::getInstance()->registerNamespace('JwtAuth_');
 
         $front = Zend_Controller_Front::getInstance();
