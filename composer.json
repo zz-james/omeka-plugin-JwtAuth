@@ -1,0 +1,13 @@
+{
+    "name": "zz-james/omeka-plugin-jwtauth",
+    "description": "JWT authentication plugin for Omeka Classic",
+    "type": "omeka-plugin",
+    "license": "GPL-3.0-or-later",
+    "require": {
+        "php": ">=7.4",
+        "firebase/php-jwt": "^6.0"
+    },
+    "config": {
+        "vendor-dir": "vendor"
+    }
+}

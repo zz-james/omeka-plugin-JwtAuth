@@ -1,0 +1,117 @@
+<?php
+// Module 'jwt_auth' -> ZF1 class prefix 'JwtAuth_'
+class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
+{
+    public function init()
+    {
+        $this->_helper->viewRenderer->setNoRender();
+        JwtAuth_CorsHelper::setHeaders($this->getRequest(), $this->getResponse());
+    }
+
+    // POST /auth/login
+    public function loginAction()
+    {
+        if (!$this->getRequest()->isPost()) {
+            return $this->_sendError('Method not allowed', 405);
+        }
+
+        $body = $this->_parseJsonBody();
+        if (!isset($body['email'], $body['password'])) {
+            return $this->_sendError('email and password required', 422);
+        }
+
+        // TODO: authenticate via Omeka_Auth_Adapter_UserTable
+        // $adapter = (new Omeka_Auth_Adapter_UserTable($this->_helper->db->getDb()))
+        //     ->setIdentity($body['email'])
+        //     ->setCredential($body['password']);
+        // $result = $adapter->authenticate();
+        // if (!$result->isValid()) { return $this->_sendError('Invalid credentials', 401); }
+        // $userId = $result->getIdentity();
+
+        // TODO: issue tokens and set cookies
+        // $tokens = JwtAuth_TokenService::issue($userId);
+        // JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
+
+        // TODO: return user JSON
+        // $this->_sendJson($this->_userPayload($userId));
+    }
+
+    // POST /auth/logout
+    public function logoutAction()
+    {
+        if (!$this->getRequest()->isPost()) {
+            return $this->_sendError('Method not allowed', 405);
+        }
+
+        // TODO: validate access token cookie
+        // TODO: revoke refresh token in DB
+        // TODO: clear cookies
+        // JwtAuth_CorsHelper::clearAuthCookies($this->getResponse());
+
+        $this->getResponse()->setHttpResponseCode(204);
+    }
+
+    // GET /auth/me
+    public function meAction()
+    {
+        // TODO: validate access token cookie, get user_id
+        // TODO: attempt silent refresh if access token expired
+        // $claims = JwtAuth_TokenService::validateAccessCookie($this->getRequest());
+        // if (!$claims) { return $this->_sendError('Unauthorized', 401); }
+        // $this->_sendJson($this->_userPayload($claims['user_id']));
+    }
+
+    // POST /auth/register
+    public function registerAction()
+    {
+        if (!$this->getRequest()->isPost()) {
+            return $this->_sendError('Method not allowed', 405);
+        }
+
+        $body = $this->_parseJsonBody();
+        if (!isset($body['name'], $body['email'], $body['password'])) {
+            return $this->_sendError('name, email, and password required', 422);
+        }
+
+        // TODO: validate email uniqueness
+        // TODO: create User record (role: contributor, active: 1)
+        // TODO: issue tokens and set cookies
+        // TODO: return 201 with user JSON
+    }
+
+    // OPTIONS preflight (CORS)
+    public function optionsAction()
+    {
+        $this->getResponse()->setHttpResponseCode(204);
+    }
+
+    private function _parseJsonBody(): array
+    {
+        $raw = $this->getRequest()->getRawBody();
+        return json_decode($raw, true) ?? [];
+    }
+
+    private function _sendJson(array $data, int $status = 200): void
+    {
+        $this->getResponse()
+            ->setHttpResponseCode($status)
+            ->setHeader('Content-Type', 'application/json');
+        echo json_encode($data);
+    }
+
+    private function _sendError(string $message, int $status = 400): void
+    {
+        $this->_sendJson(['error' => $message], $status);
+    }
+
+    private function _userPayload(int $userId): array
+    {
+        $user = $this->_helper->db->getTable('User')->find($userId);
+        return [
+            'id'    => (int) $user->id,
+            'name'  => $user->name,
+            'email' => $user->email,
+            'role'  => $user->role,
+        ];
+    }
+}
