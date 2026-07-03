@@ -49,7 +49,7 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
         // TODO: validate access token cookie
         // TODO: revoke refresh token in DB
         // TODO: clear cookies
-        // JwtAuth_CorsHelper::clearAuthCookies();
+        // JwtAuth_CorsHelper::clearAuthCookies($this->getResponse());
 
         $this->getResponse()->setHttpResponseCode(204);
     }

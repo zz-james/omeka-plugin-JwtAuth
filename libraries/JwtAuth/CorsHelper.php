@@ -27,25 +27,27 @@ class JwtAuth_CorsHelper
         $secure   = !self::_isDev();
         $sameSite = $secure ? 'None' : 'Lax';
 
-        self::_setCookie(self::ACCESS_COOKIE,  $tokens['access_token'],  900,     $secure, $sameSite);
-        self::_setCookie(self::REFRESH_COOKIE, $tokens['refresh_token'], 2592000, $secure, $sameSite);
+        self::_setCookie($response, self::ACCESS_COOKIE,  $tokens['access_token'],  900,     $secure, $sameSite);
+        self::_setCookie($response, self::REFRESH_COOKIE, $tokens['refresh_token'], 2592000, $secure, $sameSite);
     }
 
     // Clear auth cookies by setting them expired.
-    public static function clearAuthCookies(): void
+    public static function clearAuthCookies(\Zend_Controller_Response_Http $response): void
     {
-        self::_setCookie(self::ACCESS_COOKIE,  '', -1, !self::_isDev(), self::_isDev() ? 'Lax' : 'None');
-        self::_setCookie(self::REFRESH_COOKIE, '', -1, !self::_isDev(), self::_isDev() ? 'Lax' : 'None');
+        $secure   = !self::_isDev();
+        $sameSite = $secure ? 'None' : 'Lax';
+        self::_setCookie($response, self::ACCESS_COOKIE,  '', -1, $secure, $sameSite);
+        self::_setCookie($response, self::REFRESH_COOKIE, '', -1, $secure, $sameSite);
     }
 
     private static function _setCookie(
+        \Zend_Controller_Response_Http $response,
         string $name,
         string $value,
         int $maxAge,
         bool $secure,
         string $sameSite
     ): void {
-        // Use header() directly for SameSite support across PHP versions
         $cookie = sprintf(
             '%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=%s%s',
             $name,
@@ -54,7 +56,8 @@ class JwtAuth_CorsHelper
             $sameSite,
             $secure ? '; Secure' : ''
         );
-        header('Set-Cookie: ' . $cookie, false);
+        // setRawHeader stores in ZF1's response object (works in tests too)
+        $response->setRawHeader('Set-Cookie: ' . $cookie);
     }
 
     private static function _isAllowedOrigin(string $origin): bool
