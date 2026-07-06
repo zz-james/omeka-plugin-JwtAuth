@@ -26,10 +26,12 @@ class JwtAuth_Controller_Plugin_ApiAuth extends Zend_Controller_Plugin_Abstract
             // Access token missing or expired — attempt silent refresh
             $userId = JwtAuth_TokenService::validateRefreshCookie($httpRequest);
             if ($userId) {
-                $user  = $this->_loadUser($userId);
-                $tokens = JwtAuth_TokenService::issue($userId, $user->role);
-                JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
-                $claims = ['user_id' => $userId];
+                $user = $this->_loadUser($userId);
+                if ($user) {
+                    $tokens = JwtAuth_TokenService::issue($userId, $user->role);
+                    JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
+                    $claims = ['user_id' => $userId];
+                }
             }
         }
 
