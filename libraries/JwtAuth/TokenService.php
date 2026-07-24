@@ -28,6 +28,8 @@ class JwtAuth_TokenService
         $refreshToken = bin2hex(random_bytes(32));
         $tokenHash    = hash('sha256', $refreshToken);
 
+        self::_purgeStaleTokens($now);
+
         self::_db()->insert('JwtRefreshToken', [
             'token_hash' => $tokenHash,
             'user_id'    => $userId,
@@ -60,8 +62,12 @@ class JwtAuth_TokenService
         }
 
         try {
-            $decoded = JWT::decode($token, new Key(self::_secret(), self::ALGO));
-            return (array) $decoded;
+            $decoded = (array) JWT::decode($token, new Key(self::_secret(), self::ALGO));
+            // Reject tokens minted for a different site sharing the same secret
+            if (($decoded['iss'] ?? null) !== self::_issuer()) {
+                return null;
+            }
+            return $decoded;
         } catch (\Exception $e) {
             return null;
         }
@@ -90,6 +96,22 @@ class JwtAuth_TokenService
     {
         $tokenHash = hash('sha256', $rawToken);
         self::_db()->getTable('JwtRefreshToken')->revokeByTokenHash($tokenHash);
+    }
+
+    // Delete rows that can no longer authenticate anything: expired tokens,
+    // and revoked tokens past a 7-day grace window (kept briefly so a future
+    // reuse-detection pass has something to look at).
+    private static function _purgeStaleTokens(int $now): void
+    {
+        $db = self::_db();
+        $db->getAdapter()->delete(
+            "{$db->prefix}jwt_refresh_tokens",
+            sprintf(
+                "expires_at < %s OR (revoked = 1 AND created_at < %s)",
+                $db->getAdapter()->quote(date('Y-m-d H:i:s', $now)),
+                $db->getAdapter()->quote(date('Y-m-d H:i:s', $now - 604800))
+            )
+        );
     }
 
     private static function _db(): Omeka_Db

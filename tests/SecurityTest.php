@@ -242,7 +242,150 @@ class JwtAuth_SecurityTest extends Omeka_Test_AppTestCase
         $this->assertEquals(0, (int) $revoked);
     }
 
+    // L3: issuing a token purges expired rows and old revoked rows
+    public function testIssuePurgesStaleTokenRows()
+    {
+        $userId = Omeka_Test_Resource_Db::DEFAULT_USER_ID;
+
+        $this->db->getAdapter()->insert('omeka_jwt_refresh_tokens', [
+            'token_hash' => str_repeat('a', 64),
+            'user_id'    => $userId,
+            'expires_at' => date('Y-m-d H:i:s', time() - 100),
+            'revoked'    => 0,
+            'created_at' => date('Y-m-d H:i:s', time() - 200),
+        ]);
+        $this->db->getAdapter()->insert('omeka_jwt_refresh_tokens', [
+            'token_hash' => str_repeat('b', 64),
+            'user_id'    => $userId,
+            'expires_at' => date('Y-m-d H:i:s', time() + 86400),
+            'revoked'    => 1,
+            'created_at' => date('Y-m-d H:i:s', time() - 691200), // 8 days old
+        ]);
+
+        JwtAuth_TokenService::issue($userId, 'super');
+
+        $hashes = $this->db->getAdapter()->fetchCol(
+            'SELECT token_hash FROM omeka_jwt_refresh_tokens WHERE user_id = ?',
+            [$userId]
+        );
+        $this->assertNotContains(str_repeat('a', 64), $hashes, 'expired row not purged');
+        $this->assertNotContains(str_repeat('b', 64), $hashes, 'old revoked row not purged');
+        $this->assertCount(1, $hashes, 'freshly issued row missing');
+    }
+
+    // L4: token with a foreign iss claim is rejected despite a valid signature
+    public function testForeignIssuerTokenRejected()
+    {
+        $userId = Omeka_Test_Resource_Db::DEFAULT_USER_ID;
+
+        $_COOKIE['auth_token'] = JWT::encode([
+            'iss'     => 'http://other-site.example.com',
+            'iat'     => time(),
+            'exp'     => time() + 900,
+            'user_id' => $userId,
+            'role'    => 'super',
+        ], self::TEST_SECRET, 'HS256');
+
+        $this->dispatch('/auth/me');
+        $this->assertEquals(401, $this->getResponse()->getHttpResponseCode());
+    }
+
+    // L5: auth responses are marked non-cacheable
+    public function testAuthResponsesSendNoStore()
+    {
+        $this->_postJson('/auth/login', [
+            'email'    => Omeka_Test_Resource_Db::SUPER_EMAIL,
+            'password' => Omeka_Test_Resource_Db::SUPER_PASSWORD,
+        ]);
+
+        $cacheControl = null;
+        foreach ($this->getResponse()->getHeaders() as $h) {
+            if ($h['name'] === 'Cache-Control') {
+                $cacheControl = $h['value'];
+            }
+        }
+        $this->assertEquals('no-store', $cacheControl);
+    }
+
+    // L6: CORS allowlist is configurable via JWT_ALLOWED_ORIGINS
+    public function testCorsAllowlistConfigurableViaEnv()
+    {
+        putenv('JWT_ALLOWED_ORIGINS=https://archive.example.com, https://staging.example.com');
+        try {
+            $this->getRequest()
+                ->setMethod('OPTIONS')
+                ->setHeader('Origin', 'https://staging.example.com');
+            $this->dispatch('/auth/login');
+
+            $headers = [];
+            foreach ($this->getResponse()->getHeaders() as $h) {
+                $headers[$h['name']] = $h['value'];
+            }
+            $this->assertEquals('https://staging.example.com', $headers['Access-Control-Allow-Origin'] ?? null);
+
+            // The default localhost origins are no longer allowed once configured
+            $this->_resetDispatch();
+            $this->getRequest()
+                ->setMethod('OPTIONS')
+                ->setHeader('Origin', 'http://localhost:5173');
+            $this->dispatch('/auth/login');
+
+            $headers = [];
+            foreach ($this->getResponse()->getHeaders() as $h) {
+                $headers[$h['name']] = $h['value'];
+            }
+            $this->assertArrayNotHasKey('Access-Control-Allow-Origin', $headers);
+        } finally {
+            putenv('JWT_ALLOWED_ORIGINS');
+        }
+    }
+
+    // L7: cookie Secure/SameSite follow the actual request scheme
+    public function testCookiesSecureOverHttpsLaxOverHttp()
+    {
+        // http (test default): no Secure flag, SameSite=Lax
+        $this->_postJson('/auth/login', [
+            'email'    => Omeka_Test_Resource_Db::SUPER_EMAIL,
+            'password' => Omeka_Test_Resource_Db::SUPER_PASSWORD,
+        ]);
+        $cookies = $this->_authCookieHeaders();
+        $this->assertNotEmpty($cookies);
+        foreach ($cookies as $c) {
+            $this->assertStringNotContainsString('Secure', $c);
+            $this->assertStringContainsString('SameSite=Lax', $c);
+        }
+
+        // https: Secure + SameSite=None
+        $this->_resetDispatch();
+        $_SERVER['HTTPS'] = 'on';
+        try {
+            $this->_postJson('/auth/login', [
+                'email'    => Omeka_Test_Resource_Db::SUPER_EMAIL,
+                'password' => Omeka_Test_Resource_Db::SUPER_PASSWORD,
+            ]);
+            $cookies = $this->_authCookieHeaders();
+            $this->assertNotEmpty($cookies);
+            foreach ($cookies as $c) {
+                $this->assertStringContainsString('Secure', $c);
+                $this->assertStringContainsString('SameSite=None', $c);
+            }
+        } finally {
+            unset($_SERVER['HTTPS']);
+        }
+    }
+
     // --- helpers ---
+
+    private function _authCookieHeaders(): array
+    {
+        return array_values(array_filter(
+            $this->getResponse()->getRawHeaders(),
+            function ($h) {
+                return strpos($h, 'Set-Cookie: auth_token=') !== false
+                    || strpos($h, 'Set-Cookie: refresh_token=') !== false;
+            }
+        ));
+    }
 
     private function _postJson(string $path, array $body): void
     {
