@@ -3,6 +3,7 @@ class JwtAuthPlugin extends Omeka_Plugin_AbstractPlugin
 {
     protected $_hooks = [
         'install',
+        'upgrade',
         'uninstall',
         'initialize',
         'define_routes',
@@ -21,11 +22,33 @@ class JwtAuthPlugin extends Omeka_Plugin_AbstractPlugin
                 `created_at`  DATETIME        NOT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
+        $this->_createAttemptsTable();
+    }
+
+    public function hookUpgrade($args)
+    {
+        if (version_compare($args['old_version'], '0.2.0', '<')) {
+            $this->_createAttemptsTable();
+        }
     }
 
     public function hookUninstall()
     {
         $this->_db->query("DROP TABLE IF EXISTS `{$this->_db->prefix}jwt_refresh_tokens`");
+        $this->_db->query("DROP TABLE IF EXISTS `{$this->_db->prefix}jwt_auth_attempts`");
+    }
+
+    private function _createAttemptsTable()
+    {
+        $prefix = $this->_db->prefix;
+        $this->_db->query("
+            CREATE TABLE IF NOT EXISTS `{$prefix}jwt_auth_attempts` (
+                `id`           INT UNSIGNED  NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `identity`     VARCHAR(191)  NOT NULL,
+                `attempted_at` DATETIME      NOT NULL,
+                KEY `identity_attempted` (`identity`, `attempted_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
     }
 
     public function hookInitialize()
