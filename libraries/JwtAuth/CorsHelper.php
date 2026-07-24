@@ -56,8 +56,19 @@ class JwtAuth_CorsHelper
             $sameSite,
             $secure ? '; Secure' : ''
         );
-        // setRawHeader stores in ZF1's response object (works in tests too)
-        $response->setRawHeader('Set-Cookie: ' . $cookie);
+
+        if (PHP_SAPI === 'cli') {
+            // Test environment: store on the response object for inspection
+            $response->setRawHeader('Set-Cookie: ' . $cookie);
+            return;
+        }
+
+        // Real requests must NOT go through the response object: ZF1's
+        // sendHeaders() replays raw headers via header() with replace=true,
+        // so a second Set-Cookie would overwrite the first and only one
+        // cookie would ever reach the browser. header() with replace=false
+        // is the only way to emit multiple Set-Cookie headers.
+        header('Set-Cookie: ' . $cookie, false);
     }
 
     private static function _isAllowedOrigin(string $origin): bool
