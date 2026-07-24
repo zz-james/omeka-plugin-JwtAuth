@@ -157,6 +157,91 @@ class JwtAuth_SecurityTest extends Omeka_Test_AppTestCase
         }
     }
 
+    // M1: passwords under 8 chars rejected on register
+    public function testRegisterRejectsShortPassword()
+    {
+        $this->_postJson('/auth/register', [
+            'name'     => 'Short Pass',
+            'email'    => 'shortpass@example.com',
+            'password' => 'abc123',
+        ]);
+        $this->assertEquals(422, $this->getResponse()->getHttpResponseCode());
+
+        $count = $this->db->getAdapter()->fetchOne(
+            'SELECT COUNT(*) FROM omeka_users WHERE email = ?',
+            ['shortpass@example.com']
+        );
+        $this->assertEquals(0, (int) $count, 'user created despite short password');
+    }
+
+    // M2: deactivated user with a still-valid access token gets 401
+    public function testDeactivatedUserWithValidTokenGets401()
+    {
+        $userId = Omeka_Test_Resource_Db::DEFAULT_USER_ID;
+        $user   = $this->db->getTable('User')->find($userId);
+        $tokens = JwtAuth_TokenService::issue($userId, $user->role);
+
+        $this->db->getAdapter()->update(
+            'omeka_users',
+            ['active' => 0],
+            $this->db->getAdapter()->quoteInto('id = ?', $userId)
+        );
+
+        $_COOKIE['auth_token'] = $tokens['access_token'];
+        $this->dispatch('/auth/me');
+
+        $this->assertEquals(401, $this->getResponse()->getHttpResponseCode());
+    }
+
+    // M2/L1: deleted user with a still-valid access token gets 401, not a 500
+    public function testDeletedUserWithValidTokenGets401()
+    {
+        $userId = Omeka_Test_Resource_Db::DEFAULT_USER_ID;
+        $user   = $this->db->getTable('User')->find($userId);
+        $tokens = JwtAuth_TokenService::issue($userId, $user->role);
+
+        $this->db->getAdapter()->delete(
+            'omeka_users',
+            $this->db->getAdapter()->quoteInto('id = ?', $userId)
+        );
+
+        $_COOKIE['auth_token'] = $tokens['access_token'];
+        $this->dispatch('/auth/me');
+
+        $this->assertEquals(401, $this->getResponse()->getHttpResponseCode());
+    }
+
+    // M3: auth POSTs without a JSON Content-Type are rejected (CSRF guard)
+    public function testNonJsonLoginRejected()
+    {
+        $this->getRequest()
+            ->setMethod('POST')
+            ->setHeader('Content-Type', 'application/x-www-form-urlencoded')
+            ->setRawBody('email=a@b.c&password=x');
+        $this->dispatch('/auth/login');
+        $this->assertEquals(415, $this->getResponse()->getHttpResponseCode());
+    }
+
+    public function testNonJsonLogoutRejected()
+    {
+        $userId = Omeka_Test_Resource_Db::DEFAULT_USER_ID;
+        $user   = $this->db->getTable('User')->find($userId);
+        $tokens = JwtAuth_TokenService::issue($userId, $user->role);
+        $_COOKIE['refresh_token'] = $tokens['refresh_token'];
+
+        $this->getRequest()->setMethod('POST');
+        $this->dispatch('/auth/logout');
+
+        $this->assertEquals(415, $this->getResponse()->getHttpResponseCode());
+
+        // Token must NOT have been revoked by the rejected request
+        $revoked = $this->db->getAdapter()->fetchOne(
+            'SELECT revoked FROM omeka_jwt_refresh_tokens WHERE token_hash = ?',
+            [hash('sha256', $tokens['refresh_token'])]
+        );
+        $this->assertEquals(0, (int) $revoked);
+    }
+
     // --- helpers ---
 
     private function _postJson(string $path, array $body): void

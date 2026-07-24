@@ -108,7 +108,9 @@ class JwtAuth_LogoutMeTest extends Omeka_Test_AppTestCase
         $_COOKIE['auth_token']    = $tokens['access_token'];
         $_COOKIE['refresh_token'] = $tokens['refresh_token'];
 
-        $this->getRequest()->setMethod('POST');
+        $this->getRequest()
+            ->setMethod('POST')
+            ->setHeader('Content-Type', 'application/json');
         $this->dispatch('/auth/logout');
 
         $this->assertEquals(204, $this->getResponse()->getHttpResponseCode());
@@ -132,7 +134,9 @@ class JwtAuth_LogoutMeTest extends Omeka_Test_AppTestCase
         $_COOKIE['auth_token']    = $tokens['access_token'];
         $_COOKIE['refresh_token'] = $tokens['refresh_token'];
 
-        $this->getRequest()->setMethod('POST');
+        $this->getRequest()
+            ->setMethod('POST')
+            ->setHeader('Content-Type', 'application/json');
         $this->dispatch('/auth/logout');
 
         $rawHeaders     = $this->getResponse()->getRawHeaders();
