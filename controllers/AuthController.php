@@ -20,16 +20,29 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
         }
 
         $body = $this->_parseJsonBody();
-        if (!isset($body['email'], $body['password'])) {
+        if (!isset($body['email'], $body['password'])
+            || !is_string($body['email']) || !is_string($body['password'])
+        ) {
             return $this->_sendError('email and password required', 422);
+        }
+
+        $ipKey    = 'login:ip:' . $this->_clientIp();
+        $emailKey = 'login:email:' . hash('sha256', strtolower(trim($body['email'])));
+        if (JwtAuth_RateLimiter::tooManyAttempts($ipKey, 20, 900)
+            || JwtAuth_RateLimiter::tooManyAttempts($emailKey, 5, 900)
+        ) {
+            return $this->_sendError('Too many attempts. Try again later.', 429);
         }
 
         $user = $this->_helper->db->getTable('User')->findByEmail($body['email']);
 
         if (!$user || !$user->active || !password_verify($body['password'], $user->password)) {
+            JwtAuth_RateLimiter::hit($ipKey);
+            JwtAuth_RateLimiter::hit($emailKey);
             return $this->_sendError('Invalid credentials', 401);
         }
 
+        JwtAuth_RateLimiter::clear($emailKey);
         $tokens = JwtAuth_TokenService::issue((int) $user->id, $user->role);
         JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
         $this->_sendJson($this->_userPayload((int) $user->id));
@@ -78,7 +91,11 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
             return $this->_sendError('Unauthorized', 401);
         }
 
-        $tokens = JwtAuth_TokenService::issue((int) $user->id, $user->role);
+        $tokens = JwtAuth_TokenService::rotate(
+            (int) $user->id,
+            $user->role,
+            $_COOKIE['refresh_token']
+        );
         JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
         $this->_sendJson($this->_userPayload((int) $user->id));
     }
@@ -94,10 +111,16 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
             return $this->_sendError('Method not allowed', 405);
         }
 
+        $ipKey = 'register:ip:' . $this->_clientIp();
+        if (JwtAuth_RateLimiter::tooManyAttempts($ipKey, 5, 3600)) {
+            return $this->_sendError('Too many attempts. Try again later.', 429);
+        }
+        JwtAuth_RateLimiter::hit($ipKey);
+
         $body     = $this->_parseJsonBody();
-        $name     = isset($body['name'])     ? trim($body['name'])  : '';
-        $email    = isset($body['email'])    ? trim($body['email']) : '';
-        $password = $body['password'] ?? '';
+        $name     = is_string($body['name'] ?? null)  ? trim($body['name'])  : '';
+        $email    = is_string($body['email'] ?? null) ? trim($body['email']) : '';
+        $password = is_string($body['password'] ?? null) ? $body['password'] : '';
 
         if (!$name || !$email || !$password) {
             return $this->_sendError('name, email, and password required', 422);
@@ -160,6 +183,13 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
             'email' => $user->email,
             'role'  => $user->role,
         ];
+    }
+
+    private function _clientIp(): string
+    {
+        // false = do not trust X-Forwarded-For (spoofable without a
+        // configured trusted proxy)
+        return $this->getRequest()->getClientIp(false) ?: 'unknown';
     }
 
     private function _generateUsername(string $email): string

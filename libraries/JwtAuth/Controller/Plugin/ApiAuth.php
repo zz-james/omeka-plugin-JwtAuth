@@ -28,7 +28,11 @@ class JwtAuth_Controller_Plugin_ApiAuth extends Zend_Controller_Plugin_Abstract
             if ($userId) {
                 $user = $this->_loadUser($userId);
                 if ($user) {
-                    $tokens = JwtAuth_TokenService::issue($userId, $user->role);
+                    $tokens = JwtAuth_TokenService::rotate(
+                        $userId,
+                        $user->role,
+                        $_COOKIE['refresh_token']
+                    );
                     JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
                     $claims = ['user_id' => $userId];
                 }

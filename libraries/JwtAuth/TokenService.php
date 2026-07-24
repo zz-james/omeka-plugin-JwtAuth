@@ -42,6 +42,15 @@ class JwtAuth_TokenService
         ];
     }
 
+    // Rotate a refresh token: revoke the presented token, then issue a fresh
+    // access + refresh pair. Prevents a stolen refresh token from remaining
+    // valid after the legitimate client has rotated past it.
+    public static function rotate(int $userId, string $role, string $oldRawToken): array
+    {
+        self::revokeRefreshToken($oldRawToken);
+        return self::issue($userId, $role);
+    }
+
     // Validate the access token cookie. Returns claims array or null.
     public static function validateAccessCookie(\Zend_Controller_Request_Http $request): ?array
     {
@@ -99,8 +108,21 @@ class JwtAuth_TokenService
         if (!$secret) {
             throw new \RuntimeException('JwtAuth: jwt secret not configured.');
         }
+        if (APPLICATION_ENV !== 'development'
+            && (strlen($secret) < 32 || in_array($secret, self::WEAK_SECRETS, true))
+        ) {
+            throw new \RuntimeException(
+                'JwtAuth: JWT secret is too weak for a non-development environment. '
+                . 'Set a random secret of at least 32 characters.'
+            );
+        }
         return $secret;
     }
+
+    // Known committed/dev secrets that must never be accepted outside development.
+    private const WEAK_SECRETS = [
+        'dev-secret-change-in-production-xx',
+    ];
 
     private static function _issuer(): string
     {
