@@ -94,15 +94,36 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
             return $this->_sendError('Method not allowed', 405);
         }
 
-        $body = $this->_parseJsonBody();
-        if (!isset($body['name'], $body['email'], $body['password'])) {
+        $body     = $this->_parseJsonBody();
+        $name     = isset($body['name'])     ? trim($body['name'])  : '';
+        $email    = isset($body['email'])    ? trim($body['email']) : '';
+        $password = $body['password'] ?? '';
+
+        if (!$name || !$email || !$password) {
             return $this->_sendError('name, email, and password required', 422);
         }
 
-        // TODO: validate email uniqueness
-        // TODO: create User record (role: contributor, active: 1)
-        // TODO: issue tokens and set cookies
-        // TODO: return 201 with user JSON
+        if ($this->_helper->db->getTable('User')->findByEmail($email)) {
+            return $this->_sendError('That email address has already been claimed.', 422);
+        }
+
+        $user           = new User();
+        $user->name     = $name;
+        $user->email    = $email;
+        $user->role     = 'contributor';
+        $user->active   = 1;
+        $user->username = $this->_generateUsername($email);
+        $user->setPassword($password);
+
+        try {
+            $user->save();
+        } catch (Omeka_Validate_Exception $e) {
+            return $this->_sendError($e->getMessage(), 422);
+        }
+
+        $tokens = JwtAuth_TokenService::issue((int) $user->id, $user->role);
+        JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
+        $this->_sendJson($this->_userPayload((int) $user->id), 201);
     }
 
     // OPTIONS preflight (CORS)
@@ -139,5 +160,18 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
             'email' => $user->email,
             'role'  => $user->role,
         ];
+    }
+
+    private function _generateUsername(string $email): string
+    {
+        $base   = substr(preg_replace('/[^a-z0-9]/', '', strtolower(explode('@', $email)[0])), 0, 28);
+        $base   = $base ?: 'user';
+        $table  = $this->_helper->db->getTable('User');
+        $name   = $base;
+        $suffix = 1;
+        while ($table->findBySql('username = ?', [$name], true)) {
+            $name = $base . $suffix++;
+        }
+        return $name;
     }
 }
