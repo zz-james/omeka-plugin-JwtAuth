@@ -46,11 +46,11 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
             return $this->_sendError('Method not allowed', 405);
         }
 
-        // TODO: validate access token cookie
-        // TODO: revoke refresh token in DB
-        // TODO: clear cookies
-        // JwtAuth_CorsHelper::clearAuthCookies($this->getResponse());
-
+        $refreshToken = $_COOKIE['refresh_token'] ?? null;
+        if ($refreshToken) {
+            JwtAuth_TokenService::revokeRefreshToken($refreshToken);
+        }
+        JwtAuth_CorsHelper::clearAuthCookies($this->getResponse());
         $this->getResponse()->setHttpResponseCode(204);
     }
 
@@ -61,11 +61,26 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
             $this->getResponse()->setHttpResponseCode(204);
             return;
         }
-        // TODO: validate access token cookie, get user_id
-        // TODO: attempt silent refresh if access token expired
-        // $claims = JwtAuth_TokenService::validateAccessCookie($this->getRequest());
-        // if (!$claims) { return $this->_sendError('Unauthorized', 401); }
-        // $this->_sendJson($this->_userPayload($claims['user_id']));
+
+        $claims = JwtAuth_TokenService::validateAccessCookie($this->getRequest());
+        if ($claims) {
+            return $this->_sendJson($this->_userPayload((int) $claims['user_id']));
+        }
+
+        // Silent refresh: expired access token but valid refresh token
+        $userId = JwtAuth_TokenService::validateRefreshCookie($this->getRequest());
+        if (!$userId) {
+            return $this->_sendError('Unauthorized', 401);
+        }
+
+        $user = $this->_helper->db->getTable('User')->findActiveById($userId);
+        if (!$user) {
+            return $this->_sendError('Unauthorized', 401);
+        }
+
+        $tokens = JwtAuth_TokenService::issue((int) $user->id, $user->role);
+        JwtAuth_CorsHelper::setAuthCookies($this->getResponse(), $tokens);
+        $this->_sendJson($this->_userPayload((int) $user->id));
     }
 
     // POST /auth/register
