@@ -2,6 +2,12 @@
 // Module 'jwt_auth' -> ZF1 class prefix 'JwtAuth_'
 class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
 {
+    // Bcrypt hash of a random throwaway string. Verified against when the
+    // email is unknown so response timing doesn't reveal account existence.
+    private const DUMMY_HASH = '$2y$10$Oe1RlAaYfiYhx/fCo2ORBucShEay0rAorbkQz1DkS.JP8QZ3G1Vz.';
+
+    private const PASSWORD_MIN_LENGTH = 8;
+
     public function init()
     {
         $this->_helper->viewRenderer->setNoRender();
@@ -17,6 +23,9 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
         }
         if (!$this->getRequest()->isPost()) {
             return $this->_sendError('Method not allowed', 405);
+        }
+        if (!$this->_isJsonRequest()) {
+            return $this->_sendError('Content-Type must be application/json', 415);
         }
 
         $body = $this->_parseJsonBody();
@@ -36,7 +45,11 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
 
         $user = $this->_helper->db->getTable('User')->findByEmail($body['email']);
 
-        if (!$user || !$user->active || !password_verify($body['password'], $user->password)) {
+        // Always run bcrypt so unknown emails take as long as wrong passwords
+        $hash          = $user ? $user->password : self::DUMMY_HASH;
+        $passwordValid = password_verify($body['password'], $hash);
+
+        if (!$user || !$user->active || !$passwordValid) {
             JwtAuth_RateLimiter::hit($ipKey);
             JwtAuth_RateLimiter::hit($emailKey);
             return $this->_sendError('Invalid credentials', 401);
@@ -58,6 +71,10 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
         if (!$this->getRequest()->isPost()) {
             return $this->_sendError('Method not allowed', 405);
         }
+        // CSRF guard: cross-site HTML forms cannot send application/json
+        if (!$this->_isJsonRequest()) {
+            return $this->_sendError('Content-Type must be application/json', 415);
+        }
 
         $refreshToken = $_COOKIE['refresh_token'] ?? null;
         if ($refreshToken) {
@@ -77,7 +94,13 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
 
         $claims = JwtAuth_TokenService::validateAccessCookie($this->getRequest());
         if ($claims) {
-            return $this->_sendJson($this->_userPayload((int) $claims['user_id']));
+            $payload = $this->_userPayload((int) $claims['user_id']);
+            if ($payload) {
+                return $this->_sendJson($payload);
+            }
+            // User deactivated or deleted since the token was issued —
+            // fall through to the refresh path, which re-checks the DB
+            // and returns 401.
         }
 
         // Silent refresh: expired access token but valid refresh token
@@ -110,6 +133,9 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
         if (!$this->getRequest()->isPost()) {
             return $this->_sendError('Method not allowed', 405);
         }
+        if (!$this->_isJsonRequest()) {
+            return $this->_sendError('Content-Type must be application/json', 415);
+        }
 
         $ipKey = 'register:ip:' . $this->_clientIp();
         if (JwtAuth_RateLimiter::tooManyAttempts($ipKey, 5, 3600)) {
@@ -124,6 +150,13 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
 
         if (!$name || !$email || !$password) {
             return $this->_sendError('name, email, and password required', 422);
+        }
+
+        if (strlen($password) < self::PASSWORD_MIN_LENGTH) {
+            return $this->_sendError(
+                'Password must be at least ' . self::PASSWORD_MIN_LENGTH . ' characters.',
+                422
+            );
         }
 
         if ($this->_helper->db->getTable('User')->findByEmail($email)) {
@@ -174,15 +207,26 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
         $this->_sendJson(['error' => $message], $status);
     }
 
-    private function _userPayload(int $userId): array
+    // Returns null when the user no longer exists or has been deactivated,
+    // so a still-valid JWT can't represent a disabled account.
+    private function _userPayload(int $userId): ?array
     {
-        $user = $this->_helper->db->getTable('User')->find($userId);
+        $user = $this->_helper->db->getTable('User')->findActiveById($userId);
+        if (!$user) {
+            return null;
+        }
         return [
             'id'    => (int) $user->id,
             'name'  => $user->name,
             'email' => $user->email,
             'role'  => $user->role,
         ];
+    }
+
+    private function _isJsonRequest(): bool
+    {
+        $contentType = $this->getRequest()->getHeader('Content-Type') ?? '';
+        return stripos($contentType, 'application/json') === 0;
     }
 
     private function _clientIp(): string
