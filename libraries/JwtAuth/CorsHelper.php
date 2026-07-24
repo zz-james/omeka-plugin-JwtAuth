@@ -24,7 +24,7 @@ class JwtAuth_CorsHelper
         \Zend_Controller_Response_Http $response,
         array $tokens
     ): void {
-        $secure   = !self::_isDev();
+        $secure   = self::_isHttps();
         $sameSite = $secure ? 'None' : 'Lax';
 
         self::_setCookie($response, self::ACCESS_COOKIE,  $tokens['access_token'],  900,     $secure, $sameSite);
@@ -34,7 +34,7 @@ class JwtAuth_CorsHelper
     // Clear auth cookies by setting them expired.
     public static function clearAuthCookies(\Zend_Controller_Response_Http $response): void
     {
-        $secure   = !self::_isDev();
+        $secure   = self::_isHttps();
         $sameSite = $secure ? 'None' : 'Lax';
         self::_setCookie($response, self::ACCESS_COOKIE,  '', -1, $secure, $sameSite);
         self::_setCookie($response, self::REFRESH_COOKIE, '', -1, $secure, $sameSite);
@@ -56,8 +56,19 @@ class JwtAuth_CorsHelper
             $sameSite,
             $secure ? '; Secure' : ''
         );
-        // setRawHeader stores in ZF1's response object (works in tests too)
-        $response->setRawHeader('Set-Cookie: ' . $cookie);
+
+        if (PHP_SAPI === 'cli') {
+            // Test environment: store on the response object for inspection
+            $response->setRawHeader('Set-Cookie: ' . $cookie);
+            return;
+        }
+
+        // Real requests must NOT go through the response object: ZF1's
+        // sendHeaders() replays raw headers via header() with replace=true,
+        // so a second Set-Cookie would overwrite the first and only one
+        // cookie would ever reach the browser. header() with replace=false
+        // is the only way to emit multiple Set-Cookie headers.
+        header('Set-Cookie: ' . $cookie, false);
     }
 
     private static function _isAllowedOrigin(string $origin): bool
@@ -66,18 +77,37 @@ class JwtAuth_CorsHelper
         return in_array($origin, $allowed, true);
     }
 
+    // Comma-separated list from Omeka config (jwtauth.allowed_origins) or the
+    // JWT_ALLOWED_ORIGINS env var; localhost fallback covers local dev.
     private static function _allowedOrigins(): array
     {
-        // TODO: load from Omeka config (jwtauth.allowed_origins)
-        // Fallback covers local dev
+        $configured = null;
+        try {
+            $config     = Zend_Registry::get('bootstrap')->getResource('Config');
+            $configured = $config->jwtauth->allowed_origins ?? null;
+        } catch (\Exception $e) {
+            // Config resource unavailable — fall through to env
+        }
+        if (!$configured) {
+            $configured = getenv('JWT_ALLOWED_ORIGINS') ?: null;
+        }
+        if ($configured) {
+            return array_values(array_filter(array_map('trim', explode(',', $configured))));
+        }
         return [
             'http://localhost:5173',
             'http://localhost:3000',
         ];
     }
 
-    private static function _isDev(): bool
+    // Detect the actual request scheme rather than trusting APPLICATION_ENV.
+    // X-Forwarded-Proto is honoured because erring toward Secure is the safe
+    // direction — worst case is a dropped cookie behind a misconfigured proxy.
+    private static function _isHttps(): bool
     {
-        return defined('APPLICATION_ENV') && APPLICATION_ENV === 'development';
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            return true;
+        }
+        return ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
     }
 }

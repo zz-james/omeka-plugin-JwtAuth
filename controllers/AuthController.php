@@ -11,6 +11,8 @@ class JwtAuth_AuthController extends Omeka_Controller_AbstractActionController
     public function init()
     {
         $this->_helper->viewRenderer->setNoRender();
+        // Auth responses carry credentials and user data — never cacheable
+        $this->getResponse()->setHeader('Cache-Control', 'no-store');
         JwtAuth_CorsHelper::setHeaders($this->getRequest(), $this->getResponse());
     }
 
